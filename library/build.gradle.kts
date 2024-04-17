@@ -67,7 +67,7 @@ afterEvaluate {
 
                 groupId = "com.github.amsavarthan"
                 artifactId = "reaction-picker"
-                version = "1.0.0"
+                version = "1.1.0"
 
                 pom {
                     name = "Reaction Picker"
