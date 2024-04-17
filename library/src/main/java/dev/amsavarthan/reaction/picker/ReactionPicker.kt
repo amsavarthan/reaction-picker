@@ -1,13 +1,9 @@
 package dev.amsavarthan.reaction.picker
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -15,7 +11,6 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -26,13 +21,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.text.BasicText
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Text
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.movableContentOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -56,7 +53,6 @@ import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -64,11 +60,15 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.roundToIntRect
 import androidx.compose.ui.util.fastForEach
+import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.zIndex
 import dev.amsavarthan.reaction.picker.enums.Placement
 import dev.amsavarthan.reaction.picker.models.Reaction
@@ -104,7 +104,7 @@ fun ReactionPickerLayout(
     containerColor: Color = Color.Black,
     containerShape: Shape = CircleShape,
     label: @Composable (String) -> Unit = { text ->
-        BasicText(text = text)
+        ReactionLabel(text = text)
     },
     icon: @Composable (Reaction) -> Unit = { reaction ->
         ReactionIcon(
@@ -140,6 +140,24 @@ fun ReactionPickerLayout(
                 content = content
             )
         }
+    }
+}
+
+@Composable
+fun ReactionLabel(
+    text: String,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .clip(CircleShape)
+            .background(Color.Black.copy(alpha = 0.5f))
+            .padding(horizontal = 6.dp, vertical = 2.dp)
+    ) {
+        Text(
+            text = text,
+            color = Color.White
+        )
     }
 }
 
@@ -324,6 +342,7 @@ private fun ReactionPicker(
 
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AnimatedReactionItem(
     index: Int,
@@ -349,6 +368,7 @@ private fun AnimatedReactionItem(
 
     val currentOnShown by rememberUpdatedState(onShown)
     val currentOnDismiss by rememberUpdatedState(onDismiss)
+    val tooltipState = rememberTooltipState(isPersistent = true)
 
     // Calculate the offset multiplier based on the picker placement
     val offsetMultiplier = when (state.pickerPlacement) {
@@ -380,6 +400,7 @@ private fun AnimatedReactionItem(
     // Start animation when the picker is about to be dismissed
     LaunchedEffect(state.isVisible) {
         if (state.isVisible) return@LaunchedEffect
+        tooltipState.dismiss()
 
         // Concurrently animate the alpha and translation
         if (state.isDismissingWithSelection && state.selectedReaction === reaction) {
@@ -417,47 +438,45 @@ private fun AnimatedReactionItem(
         currentOnDismiss()
     }
 
-    Column(
-        modifier = modifier,
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(
-            space = properties.spaceBetweenReactionAndLabel
-        )
-    ) {
-        val iconSize by animateDpAsState(
-            label = "Reaction size",
-            targetValue = when {
-                state.hoveredReaction === reaction -> ReactionItemSizeOnHover
-                state.hoveredReaction != null -> ReactionItemSizeOnAnyHover
-                else -> ReactionItemSize
-            },
-        )
+    val iconSize by animateDpAsState(
+        label = "Reaction size",
+        targetValue = when {
+            state.hoveredReaction === reaction -> ReactionItemSizeOnHover
+            state.hoveredReaction != null -> ReactionItemSizeOnAnyHover
+            else -> ReactionItemSize
+        },
+    )
 
-        val movableLabel = remember {
-            movableContentOf {
-                AnimatedVisibility(
-                    visible = state.hoveredReaction === reaction,
-                    enter = slideInVertically { it * offsetMultiplier } + fadeIn(),
-                    exit = fadeOut(tween(Duration.VERY_SHORT_DURATION))
-                ) {
-                    val labelText = when {
-                        reaction.labelRes != null -> stringResource(id = reaction.labelRes)
-                        reaction.label != null -> reaction.label
-                        else -> throw IllegalStateException("Either label or labelRes should be provided")
-                    }
-                    label(labelText)
-                }
+    LaunchedEffect(iconSize) {
+        //When icon size is about to be changed to ReactionItemSizeOnHover, show the tooltip
+        if (iconSize > ReactionItemSizeOnHover - 8.dp) {
+            tooltipState.show()
+        } else {
+            tooltipState.dismiss()
+        }
+    }
+
+    val isSelectedReaction = state.selectedReaction === reaction
+
+    TooltipBox(
+        state = tooltipState,
+        focusable = false,
+        enableUserInput = false,
+        positionProvider = rememberTooltipPositionProvider(
+            spacingBetweenTooltipAndAnchor = properties.spaceBetweenReactionAndLabel,
+            placement = state.pickerPlacement
+        ),
+        tooltip = {
+            val labelText = when {
+                reaction.labelRes != null -> stringResource(id = reaction.labelRes)
+                reaction.label != null -> reaction.label
+                else -> throw IllegalStateException("Either label or labelRes should be provided")
             }
-        }
-
-        if (state.pickerPlacement == Placement.ABOVE) {
-            movableLabel()
-        }
-
-        val isSelectedReaction = state.selectedReaction === reaction
-
+            label(labelText)
+        },
+    ) {
         Box(
-            modifier = Modifier
+            modifier = modifier
                 .size(iconSize)
                 .graphicsLayer {
                     compositingStrategy = CompositingStrategy.ModulateAlpha
@@ -491,12 +510,44 @@ private fun AnimatedReactionItem(
                 icon(reaction)
             }
         }
-
-        if (state.pickerPlacement == Placement.BELOW) {
-            movableLabel()
-        }
     }
 
+}
+
+@Composable
+private fun rememberTooltipPositionProvider(
+    spacingBetweenTooltipAndAnchor: Dp,
+    placement: Placement,
+): PopupPositionProvider {
+    val tooltipAnchorSpacing = with(LocalDensity.current) {
+        spacingBetweenTooltipAndAnchor.roundToPx()
+    }
+    return remember(tooltipAnchorSpacing, placement) {
+        object : PopupPositionProvider {
+            override fun calculatePosition(
+                anchorBounds: IntRect,
+                windowSize: IntSize,
+                layoutDirection: LayoutDirection,
+                popupContentSize: IntSize,
+            ): IntOffset {
+                val x = anchorBounds.left + (anchorBounds.width - popupContentSize.width) / 2
+
+                val y = when (placement) {
+                    Placement.ABOVE -> {
+                        // Tooltip prefers to be above the anchor,
+                        // but if this causes the tooltip to overlap with the anchor
+                        // then we place it below the anchor
+                        val posY = anchorBounds.top - popupContentSize.height - tooltipAnchorSpacing
+                        if (posY < 0) anchorBounds.bottom + tooltipAnchorSpacing else posY
+                    }
+
+                    Placement.BELOW -> anchorBounds.bottom + tooltipAnchorSpacing
+                }
+
+                return IntOffset(x, y)
+            }
+        }
+    }
 }
 
 @Composable
